@@ -1,7 +1,7 @@
 defmodule Nhf1 do
   @moduledoc """
   Camping
-
+  
   @author "Egyetemi Hallgató <egy.hallg@dp.vik.bme.hu>"
   @date   "2022-10-15"
   """
@@ -30,38 +30,24 @@ defmodule Nhf1 do
 
   @spec satrak(pd :: puzzle_desc) :: tss :: [tent_dirs]
   # tss is the list of all solutions of the puzzle described by pd in an arbitrary order
-  def satrak(_tents_count_rows, _tents_count_cols, []), do: []
+  def satrak({_tents_count_rows, _tents_count_cols, []}), do: []
 
   def satrak({tents_count_rows, tents_count_cols, trees}) do
     row_count = length(tents_count_rows)
     col_count = length(tents_count_cols)
 
-    map = init_tree_tent_map(trees)
-    map = get_possible_tent_fields(map, row_count, col_count)
+    initial_map = init_tree_tent_map(trees)
+    map = fill_map_with_possible_tent_fields(initial_map, row_count, col_count)
 
     find_solutions(map, tents_count_rows, tents_count_cols)
-
-    # Get all possible directions
-
-    # Check if there's a tent which has only one direction left => fix solution
-    #   Check if the fix tent is in a row or column with only one tent required => remove all other tents from the row or column
-    #   Remove the fix tent from other trees which it could've been attached to + remove all surrounding trees
-
-    # If there are trees with multiple possibilities left, pick the one with the lowest row or column constraint
-    #   If we can't place enough tents in this row or column by picking the tent, abort the branch right away
-    #   If we exceed the number of rows or columns by picking this tree, abort the branch right away
-    #   Optional: If we match the row or column constraint, remove all other tents from the corresponding trees
-
-    # If all trees have one possible tent attached to them, we found a solution
-
-    # possible_tent_fields = get_possible_tent_fields(pd)
+    |> Enum.map(fn items -> Enum.map(items, fn {dir, _tent} -> dir end) end)
   end
 
   defp init_tree_tent_map(trees) do
     for tree <- trees, into: %{}, do: {tree, %{}}
   end
 
-  defp get_possible_tent_fields(map, row_count, col_count) do
+  defp fill_map_with_possible_tent_fields(map, row_count, col_count) do
     for {tree, _value} <- map,
         into: %{},
         do: {tree, get_tree_neighbors(tree, row_count, col_count, map)}
@@ -70,7 +56,6 @@ defmodule Nhf1 do
   defp get_tree_neighbors(tree, row_count, col_count, map) do
     for direction <- [:n, :e, :s, :w],
         (result = get_tree_neighbor(tree, direction, row_count, col_count, map)) !== nil,
-        into: %{},
         do: {direction, result}
   end
 
@@ -97,28 +82,34 @@ defmodule Nhf1 do
   defp find_solutions(tree_tent_map, tents_count_rows, tents_count_cols),
     do: find_solutions(tree_tent_map, tents_count_rows, tents_count_cols, [])
 
-  defp find_solutions(tree_tent_map, _tents_count_rows, _tents_count_cols, tents)
-       when map_size(tree_tent_map) === 0,
-       do: tents
+  defp find_solutions(tree_tent_map, tents_count_rows, tents_count_cols, tents)
+       when map_size(tree_tent_map) === 0 do
+    if solution_satisfies_row_constraint?(tents, tents_count_rows) &&
+         solution_satisfies_col_constraint?(tents, tents_count_cols),
+       do: [tents],
+       else: nil
+  end
 
   defp find_solutions(tree_tent_map, tents_count_rows, tents_count_cols, tents_so_far) do
-    # IO.inspect(tree_tent_map)
-    first_tree = Map.keys(tree_tent_map) |> hd()
-    tent_map = Map.get(tree_tent_map, first_tree)
+    picked_tree = Map.keys(tree_tent_map) |> hd()
+    tents = Map.get(tree_tent_map, picked_tree)
 
-    for {dir, tent} <- tent_map,
-        !violates_row_constraint?(tent, tents_so_far, tents_count_rows),
-        !violates_col_constraint?(tent, tents_so_far, tents_count_cols),
-        !touches_other_tent?(tent, tents_so_far),
-        result =
-          find_solutions(
-            Map.delete(tree_tent_map, first_tree),
-            tents_count_rows,
-            tents_count_cols,
-            tents_so_far ++ [{dir, tent}]
-          ),
-        length(result) !== 0,
-        do: result
+    result =
+      for {dir, tent} <- tents,
+          !violates_row_constraint?(tent, tents_so_far, tents_count_rows),
+          !violates_col_constraint?(tent, tents_so_far, tents_count_cols),
+          !touches_other_tent?(tent, tents_so_far),
+          result =
+            find_solutions(
+              Map.delete(tree_tent_map, picked_tree),
+              tents_count_rows,
+              tents_count_cols,
+              tents_so_far ++ [{dir, tent}]
+            ),
+          result !== nil,
+          do: result
+
+    result |> Enum.flat_map(fn item -> item end)
   end
 
   defp violates_row_constraint?({i, _j}, tents_so_far, tents_count_rows) do
@@ -137,5 +128,29 @@ defmodule Nhf1 do
 
   defp touches_other_tent?({i, j}, tents_so_far) do
     Enum.any?(tents_so_far, fn {_dir, {a, b}} -> abs(a - i) <= 1 && abs(b - j) <= 1 end)
+  end
+
+  defp solution_satisfies_row_constraint?(solution, tents_count_rows) do
+    matches =
+      for i <- 0..(length(tents_count_rows) - 1) do
+        tents_count_row = Enum.at(tents_count_rows, i)
+
+        row_tents = solution |> Enum.filter(fn {_dir, {a, _j}} -> a === i + 1 end)
+        tents_count_row < 0 || length(row_tents) === tents_count_row
+      end
+
+    Enum.all?(matches, fn item -> item === true end)
+  end
+
+  defp solution_satisfies_col_constraint?(solution, tents_count_cols) do
+    matches =
+      for i <- 0..(length(tents_count_cols) - 1) do
+        tents_count_col = Enum.at(tents_count_cols, i)
+
+        col_tents = solution |> Enum.filter(fn {_dir, {_a, b}} -> b === i + 1 end)
+        tents_count_col < 0 || length(col_tents) === tents_count_col
+      end
+
+    Enum.each(matches, fn item -> item === true end)
   end
 end
